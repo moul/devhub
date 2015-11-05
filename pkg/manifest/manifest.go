@@ -13,7 +13,7 @@ import (
 const ManifestURL = "https://raw.githubusercontent.com/scaleway/image-tools/master/public-images.manifest"
 
 type Manifest struct {
-	Images []scwImage.Image
+	Images map[string]scwImage.Image
 }
 
 func GetManifest() (*Manifest, error) {
@@ -31,7 +31,7 @@ func GetManifestByURL(manifestURL string) (*Manifest, error) {
 	re := regexp.MustCompile(`\ +`)
 
 	manifest := Manifest{
-		Images: make([]scwImage.Image, 0),
+		Images: make(map[string]scwImage.Image, 0),
 	}
 
 	for scanner.Scan() {
@@ -51,7 +51,7 @@ func GetManifestByURL(manifestURL string) (*Manifest, error) {
 			Path:   cols[3],
 			Branch: "master",
 		}
-		manifest.Images = append(manifest.Images, newEntry)
+		manifest.Images[newEntry.FullName()] = newEntry
 	}
 
 	return &manifest, nil

@@ -10,11 +10,11 @@ import (
 )
 
 type Image struct {
-	Name   string
-	Tags   []string
-	Repo   string
-	Path   string
-	Branch string
+	Name   string   `json:"name"`
+	Tags   []string `json:"tags"`
+	Repo   string   `json:"repo"`
+	Path   string   `json:"path"`
+	Branch string   `json:"branch"`
 }
 
 func (i *Image) RepoHost() string {
