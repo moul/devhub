@@ -4,22 +4,78 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
+	"github.com/renstrom/fuzzysearch/fuzzy"
 
 	"github.com/scaleway/devhub/pkg/manifest"
 	"github.com/scaleway/scaleway-cli/pkg/api"
 )
 
+type ImageMapping struct {
+	ApiUUID      string
+	ManifestName string
+	RankMatch    int
+	Found        int
+}
+
 type Cache struct {
-	Manifest       *scwManifest.Manifest     `json:"manifest"`
-	APIImages      *[]api.ScalewayImage      `json:"api_images"`
-	APIBootscripts *[]api.ScalewayBootscript `json:"api_bootscripts"`
+	Mapping struct {
+		MappedImages   []ImageMapping `json:"mapped_images"`
+		UnmappedImages []ImageMapping `json:"unmapped_images"`
+	} `json:"mapping"`
+	Manifest *scwManifest.Manifest `json:"manifest"`
+	Api      struct {
+		Images      *[]api.ScalewayImage      `json:"api_images"`
+		Bootscripts *[]api.ScalewayBootscript `json:"api_bootscripts"`
+	} `json:"api"`
 }
 
 var cache Cache
+
+func ImageCodeName(inputName string) string {
+	name := strings.ToLower(inputName)
+	name = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(name, "-")
+	name = regexp.MustCompile(`--+`).ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+	return name
+}
+
+func (c *Cache) MapImages() {
+	// FIXME: add mutex
+	if c.Manifest == nil || c.Api.Images == nil {
+		return
+	}
+
+	c.Mapping.MappedImages = make([]ImageMapping, 0)
+	c.Mapping.UnmappedImages = make([]ImageMapping, 0)
+
+	logrus.Infof("Mapping images")
+	for _, manifestImage := range c.Manifest.Images {
+		imageMapping := ImageMapping{
+			ManifestName: manifestImage.Name,
+		}
+		manifestImageName := ImageCodeName(manifestImage.Name)
+		for _, apiImage := range *c.Api.Images {
+			apiImageName := ImageCodeName(apiImage.Name)
+			if rankMatch := fuzzy.RankMatch(manifestImageName, apiImageName); rankMatch > -1 {
+				imageMapping.ApiUUID = apiImage.Identifier
+				imageMapping.RankMatch = rankMatch
+				imageMapping.Found++
+			}
+		}
+		if imageMapping.Found == 1 {
+			c.Mapping.MappedImages = append(c.Mapping.MappedImages, imageMapping)
+		} else {
+			c.Mapping.UnmappedImages = append(c.Mapping.UnmappedImages, imageMapping)
+		}
+	}
+	logrus.Infof("Images mapped")
+}
 
 func main() {
 	router := gin.Default()
@@ -40,14 +96,14 @@ func main() {
 	// router.GET("/images/:name/new", newServerEndpoint)
 	// router.GET("/images/:name/badge", imageBadgeEndpoint)
 
-	API, err := api.NewScalewayAPI("https://api.scaleway.com", "", os.Getenv("SCALEWAY_ORGANIZATION"), os.Getenv("SCALEWAY_TOKEN"))
+	Api, err := api.NewScalewayAPI("https://api.scaleway.com", "", os.Getenv("SCALEWAY_ORGANIZATION"), os.Getenv("SCALEWAY_TOKEN"))
 	if err != nil {
-		logrus.Fatalf("Failed to initialize Scaleway API: %v", err)
+		logrus.Fatalf("Failed to initialize Scaleway Api: %v", err)
 	}
 
 	go updateManifestCron(&cache)
-	go updateScwAPIImages(API, &cache)
-	go updateScwAPIBootscripts(API, &cache)
+	go updateScwApiImages(Api, &cache)
+	// go updateScwApiBootscripts(Api, &cache)
 
 	router.Run(":4242")
 }
@@ -88,31 +144,32 @@ func imageEndpoint(c *gin.Context) {
 	})
 }
 
-func updateScwAPIImages(API *api.ScalewayAPI, cache *Cache) {
+func updateScwApiImages(Api *api.ScalewayAPI, cache *Cache) {
 	for {
-		logrus.Infof("Fetching images from the API...")
-		images, err := API.GetImages()
+		logrus.Infof("Fetching images from the Api...")
+		images, err := Api.GetImages()
 		if err != nil {
-			logrus.Errorf("Failed to retrieve images list from the API: %v", err)
+			logrus.Errorf("Failed to retrieve images list from the Api: %v", err)
 		} else {
-			cache.APIImages = images
+			cache.Api.Images = images
 			logrus.Infof("Images fetched: %d images", len(*images))
+			cache.MapImages()
 		}
-		time.Sleep(3 * time.Minute)
+		time.Sleep(5 * time.Minute)
 	}
 }
 
-func updateScwAPIBootscripts(API *api.ScalewayAPI, cache *Cache) {
+func updateScwApiBootscripts(Api *api.ScalewayAPI, cache *Cache) {
 	for {
-		logrus.Infof("Fetching bootscripts from the API...")
-		bootscripts, err := API.GetBootscripts()
+		logrus.Infof("Fetching bootscripts from the Api...")
+		bootscripts, err := Api.GetBootscripts()
 		if err != nil {
-			logrus.Errorf("Failed to retrieve bootscripts list from the API: %v", err)
+			logrus.Errorf("Failed to retrieve bootscripts list from the Api: %v", err)
 		} else {
-			cache.APIBootscripts = bootscripts
+			cache.Api.Bootscripts = bootscripts
 			logrus.Infof("Bootscripts fetched: %d bootscripts", len(*bootscripts))
 		}
-		time.Sleep(3 * time.Minute)
+		time.Sleep(5 * time.Minute)
 	}
 }
 
@@ -125,7 +182,8 @@ func updateManifestCron(cache *Cache) {
 		} else {
 			cache.Manifest = manifest
 			logrus.Infof("Manifest fetched: %d images", len(manifest.Images))
+			cache.MapImages()
 		}
-		time.Sleep(3 * time.Minute)
+		time.Sleep(5 * time.Minute)
 	}
 }
