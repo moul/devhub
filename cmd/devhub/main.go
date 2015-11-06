@@ -16,17 +16,11 @@ import (
 	"github.com/scaleway/scaleway-cli/pkg/api"
 )
 
-type ImageMapping struct {
-	ApiUUID      string
-	ManifestName string
-	RankMatch    int
-	Found        int
-}
+var cache Cache
 
 type Cache struct {
 	Mapping struct {
-		MappedImages   []ImageMapping `json:"mapped_images"`
-		UnmappedImages []ImageMapping `json:"unmapped_images"`
+		Images []ImageMapping `json:"mapped_images"`
 	} `json:"mapping"`
 	Manifest *scwManifest.Manifest `json:"manifest"`
 	Api      struct {
@@ -35,14 +29,19 @@ type Cache struct {
 	} `json:"api"`
 }
 
-var cache Cache
+func NewCache() Cache {
+	return Cache{}
+}
 
-func ImageCodeName(inputName string) string {
-	name := strings.ToLower(inputName)
-	name = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(name, "-")
-	name = regexp.MustCompile(`--+`).ReplaceAllString(name, "-")
-	name = strings.Trim(name, "-")
-	return name
+func (c *Cache) GetImageByName(name string) []*ImageMapping {
+	found := []*ImageMapping{}
+	for idx, image := range c.Mapping.Images {
+		if image.MatchName(name) {
+			fmt.Println(image, name)
+			found = append(found, &c.Mapping.Images[idx])
+		}
+	}
+	return found
 }
 
 func (c *Cache) MapImages() {
@@ -51,8 +50,7 @@ func (c *Cache) MapImages() {
 		return
 	}
 
-	c.Mapping.MappedImages = make([]ImageMapping, 0)
-	c.Mapping.UnmappedImages = make([]ImageMapping, 0)
+	c.Mapping.Images = make([]ImageMapping, 0)
 
 	logrus.Infof("Mapping images")
 	for _, manifestImage := range c.Manifest.Images {
@@ -68,13 +66,34 @@ func (c *Cache) MapImages() {
 				imageMapping.Found++
 			}
 		}
-		if imageMapping.Found == 1 {
-			c.Mapping.MappedImages = append(c.Mapping.MappedImages, imageMapping)
-		} else {
-			c.Mapping.UnmappedImages = append(c.Mapping.UnmappedImages, imageMapping)
-		}
+		c.Mapping.Images = append(c.Mapping.Images, imageMapping)
 	}
 	logrus.Infof("Images mapped")
+}
+
+type ImageMapping struct {
+	ApiUUID      string
+	ManifestName string
+	RankMatch    int
+	Found        int
+}
+
+func (i *ImageMapping) MatchName(input string) bool {
+	if input == i.ApiUUID {
+		return true
+	}
+	if fuzzy.RankMatch(i.ManifestName, input) > -1 {
+		return true
+	}
+	return false
+}
+
+func ImageCodeName(inputName string) string {
+	name := strings.ToLower(inputName)
+	name = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(name, "-")
+	name = regexp.MustCompile(`--+`).ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+	return name
 }
 
 func main() {
@@ -84,12 +103,9 @@ func main() {
 
 	router.GET("/", indexEndpoint)
 
-	v1 := router.Group("/v1")
-	{
-		v1.GET("/images", imagesEndpoint)
-		v1.GET("/images/:name", imageEndpoint)
-		v1.GET("/images/:name/dockerfile", imageDockerfileEndpoint)
-	}
+	router.GET("/images", imagesEndpoint)
+	router.GET("/images/:name", imageEndpoint)
+	router.GET("/images/:name/dockerfile", imageDockerfileEndpoint)
 
 	router.GET("/cache", cacheEndpoint)
 
@@ -138,10 +154,22 @@ func imageDockerfileEndpoint(c *gin.Context) {
 
 func imageEndpoint(c *gin.Context) {
 	name := c.Param("name")
-	image := cache.Manifest.Images[name]
-	c.JSON(http.StatusOK, gin.H{
-		"image": image,
-	})
+	images := cache.GetImageByName(name)
+	switch len(images) {
+	case 0:
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "No such image",
+		})
+	case 1:
+		c.JSON(http.StatusOK, gin.H{
+			"image": images[0],
+		})
+	default:
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":  "Too much images are matching your request",
+			"images": images,
+		})
+	}
 }
 
 func updateScwApiImages(Api *api.ScalewayAPI, cache *Cache) {
