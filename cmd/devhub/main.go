@@ -109,7 +109,7 @@ func main() {
 
 	router.GET("/cache", cacheEndpoint)
 
-	// router.GET("/images/:name/new", newServerEndpoint)
+	router.GET("/images/:name/new-server", newServerEndpoint)
 	// router.GET("/images/:name/badge", imageBadgeEndpoint)
 
 	Api, err := api.NewScalewayAPI("https://api.scaleway.com", "", os.Getenv("SCALEWAY_ORGANIZATION"), os.Getenv("SCALEWAY_TOKEN"))
@@ -164,6 +164,24 @@ func imageEndpoint(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"image": images[0],
 		})
+	default:
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":  "Too much images are matching your request",
+			"images": images,
+		})
+	}
+}
+
+func newServerEndpoint(c *gin.Context) {
+	name := c.Param("name")
+	images := cache.GetImageByName(name)
+	switch len(images) {
+	case 0:
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "No such image",
+		})
+	case 1:
+		c.Redirect(http.StatusFound, fmt.Sprintf("https://cloud.scaleway.com/#/servers/new?image=%s", images[0].ApiUUID))
 	default:
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":  "Too much images are matching your request",
