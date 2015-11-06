@@ -27,6 +27,7 @@ func main() {
 	v1 := router.Group("/v1")
 	{
 		v1.GET("/images", imagesEndpoint)
+		v1.GET("/images/:name", imageEndpoint)
 		v1.GET("/images/:name/dockerfile", imageDockerfileEndpoint)
 	}
 
@@ -55,6 +56,14 @@ func imageDockerfileEndpoint(c *gin.Context) {
 		})
 	}
 	c.String(http.StatusOK, dockerfile)
+}
+
+func imageEndpoint(c *gin.Context) {
+	name := c.Param("name")
+	image := cache.Manifest.Images[name]
+	c.JSON(http.StatusOK, gin.H{
+		"image": image,
+	})
 }
 
 func updateManifestCron(cache *Cache) {
