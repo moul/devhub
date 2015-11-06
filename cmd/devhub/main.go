@@ -90,11 +90,13 @@ func imageEndpoint(c *gin.Context) {
 
 func updateScwAPIImages(API *api.ScalewayAPI, cache *Cache) {
 	for {
+		logrus.Infof("Fetching images from the API...")
 		images, err := API.GetImages()
-		if err == nil {
-			cache.APIImages = images
-		} else {
+		if err != nil {
 			logrus.Errorf("Failed to retrieve images list from the API: %v", err)
+		} else {
+			cache.APIImages = images
+			logrus.Infof("Images fetched: %d images", len(*images))
 		}
 		time.Sleep(3 * time.Minute)
 	}
@@ -102,11 +104,13 @@ func updateScwAPIImages(API *api.ScalewayAPI, cache *Cache) {
 
 func updateScwAPIBootscripts(API *api.ScalewayAPI, cache *Cache) {
 	for {
+		logrus.Infof("Fetching bootscripts from the API...")
 		bootscripts, err := API.GetBootscripts()
-		if err == nil {
-			cache.APIBootscripts = bootscripts
-		} else {
+		if err != nil {
 			logrus.Errorf("Failed to retrieve bootscripts list from the API: %v", err)
+		} else {
+			cache.APIBootscripts = bootscripts
+			logrus.Infof("Bootscripts fetched: %d bootscripts", len(*bootscripts))
 		}
 		time.Sleep(3 * time.Minute)
 	}
@@ -120,8 +124,8 @@ func updateManifestCron(cache *Cache) {
 			logrus.Errorf("Cannot get manifest: %v", err)
 		} else {
 			cache.Manifest = manifest
+			logrus.Infof("Manifest fetched: %d images", len(manifest.Images))
 		}
-		logrus.Infof("Manifest fetched: %d images", len(manifest.Images))
 		time.Sleep(3 * time.Minute)
 	}
 }
